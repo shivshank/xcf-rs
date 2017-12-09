@@ -1,0 +1,8 @@
+[package]
+name = "xcf"
+version = "0.1.0"
+authors = ["shivshank"]
+
+[dependencies]
+derive-error = "0.0.4"
+byteorder = "1"

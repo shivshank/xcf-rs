@@ -8,6 +8,7 @@ license = "Unlicense"
 readme = "README.md"
 
 keywords = ["gimp"]
+repository = "https://github.com/shivshank/xcf-rs"
 
 [dependencies]
 derive-error = "0.0.4"

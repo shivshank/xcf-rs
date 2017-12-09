@@ -1,8 +1,9 @@
 # XCF File Utility
 
-I built this for extracting layer and pixel data from XCF files for my game's art pipeline.
+I wrote this for extracting layer and pixel data from XCF files for my game's art pipeline.
 
-Currently this is its only functionality (and these must either be RGB or RGBA images). Tests needed. Will most likely break with newer file versions. Contributions welcome.
+Currently this is its only functionality (and these must either be RGB or RGBA images). Tests
+needed. Will most likely break with newer file versions. Contributions welcome.
 
 # Example
 

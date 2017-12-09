@@ -2,6 +2,12 @@
 name = "xcf"
 version = "0.1.0"
 authors = ["shivshank"]
+description = "A basic standalone GIMP XCF library in Rust."
+
+license = "Unlicense"
+readme = "README.md"
+
+keywords = ["gimp"]
 
 [dependencies]
 derive-error = "0.0.4"

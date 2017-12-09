@@ -11,8 +11,8 @@ extern crate xcf;
 use xcf::Xcf;
 
 fn main() {
-	let mut rdr = File::open("untitled.xcf")
-		.expect("Failed to open file.");
+    let mut rdr = File::open("untitled.xcf")
+        .expect("Failed to open file.");
     let raw_image = Xcf::parse(&mut rdr)
         .expect("Failed to parse XCF file.");
 }

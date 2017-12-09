@@ -1,9 +1,11 @@
 # XCF File Utility
 
+[![Latest Version](https://img.shields.io/crates/v/xcf.svg)](https://crates.io/crates/xcf)
+
 I wrote this for extracting layer and pixel data from XCF files for my game's art pipeline.
 
 Currently this is its only functionality (and these must either be RGB or RGBA images). Tests
-needed. Will most likely break with newer file versions. Contributions welcome.
+needed. Contributions welcome.
 
 # Example
 

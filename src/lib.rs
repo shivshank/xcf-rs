@@ -1,3 +1,5 @@
+//! Read pixel data from GIMP's native XCF files.
+
 #[macro_use]
 extern crate derive_error;
 extern crate byteorder;
@@ -8,6 +10,9 @@ use std::string;
 use std::cmp;
 use std::io;
 use std::io::{Read, Seek, SeekFrom};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -21,11 +26,21 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Xcf {
     pub header: XcfHeader,
-    layers: Vec<Layer>,
+    pub layers: Vec<Layer>,
 }
 
+/// A GIMP XCF file.
+///
+/// If you need to access multiple layers at once, access layers field and use `split_at`.
 impl Xcf {
-    pub fn parse<R: Read + Seek>(mut rdr: R) -> Result<Xcf, Error> {
+    /// Open an XCF file at the path specified.
+    pub fn open<P: AsRef<Path>>(p: P) -> Result<Xcf, Error> {
+        let rdr = BufReader::new(File::open(p)?);
+        Xcf::load(rdr)
+    }
+
+    /// Read an XCF file from a Reader.
+    pub fn load<R: Read + Seek>(mut rdr: R) -> Result<Xcf, Error> {
         let header = XcfHeader::parse(&mut rdr)?;
 
         let mut layers = Vec::new();
@@ -45,6 +60,14 @@ impl Xcf {
         Ok(Xcf {
             header, layers,
         })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.header.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.header.height
     }
 
     pub fn layer(&self, name: &str) -> Option<&Layer> {
@@ -68,7 +91,7 @@ pub struct XcfHeader {
 }
 
 impl XcfHeader {
-    pub fn parse<R: Read>(mut rdr: R) -> Result<XcfHeader, Error> {
+    fn parse<R: Read>(mut rdr: R) -> Result<XcfHeader, Error> {
         let mut magic = [0u8; 9];
         rdr.read_exact(&mut magic)?;
         if magic != *b"gimp xcf " {
@@ -123,7 +146,7 @@ pub enum ColorType {
 }
 
 impl ColorType {
-    pub fn new(kind: u32) -> Result<ColorType, Error> {
+    fn new(kind: u32) -> Result<ColorType, Error> {
         use self::ColorType::*;
         Ok(match kind {
             0 => Rgb,
@@ -142,7 +165,9 @@ pub struct Property {
 }
 
 impl Property {
-    pub fn guess_size(&self) -> usize {
+    // TODO: GIMP usually calculates sizes based on data and goes from that instead of the reported
+    // property length... (for known properties)
+    fn guess_size(&self) -> usize {
         match self.payload {
             PropertyPayload::ColorMap { colors, .. } => {
                 /* apparently due to a GIMP bug sometimes self.length will be n + 4 */
@@ -153,7 +178,7 @@ impl Property {
         }
     }
 
-    pub fn parse<R: Read>(mut rdr: R) -> Result<Property, Error> {
+    fn parse<R: Read>(mut rdr: R) -> Result<Property, Error> {
         let kind = PropertyIdentifier::new(rdr.read_u32::<BigEndian>()?);
         let length = rdr.read_u32::<BigEndian>()? as usize;
         let payload = PropertyPayload::parse(&mut rdr, kind, length)?;
@@ -162,7 +187,7 @@ impl Property {
         })
     }
 
-    pub fn parse_list<R: Read>(mut rdr: R) -> Result<Vec<Property>, Error> {
+    fn parse_list<R: Read>(mut rdr: R) -> Result<Vec<Property>, Error> {
         let mut props = Vec::new();
         loop {
             let p = Property::parse(&mut rdr)?;
@@ -198,7 +223,7 @@ macro_rules! prop_ident_gen {
         }
 
         impl PropertyIdentifier {
-            pub fn new(prop: u32) -> PropertyIdentifier {
+            fn new(prop: u32) -> PropertyIdentifier {
                 match prop {
                     $(
                         $val => PropertyIdentifier::$prop
@@ -238,7 +263,7 @@ pub enum PropertyPayload {
 }
 
 impl PropertyPayload {
-    pub fn parse<R: Read>(mut rdr: R, kind: PropertyIdentifier, length: usize)
+    fn parse<R: Read>(mut rdr: R, kind: PropertyIdentifier, length: usize)
             -> Result<PropertyPayload, Error> {
         use self::PropertyIdentifier::*;
         Ok(match kind {
@@ -263,7 +288,7 @@ pub struct Layer {
 }
 
 impl Layer {
-    pub fn parse<R: Read + Seek>(mut rdr: R) -> Result<Layer, Error> {
+    fn parse<R: Read + Seek>(mut rdr: R) -> Result<Layer, Error> {
         let width = rdr.read_u32::<BigEndian>()?;
         let height = rdr.read_u32::<BigEndian>()?;
         let kind = LayerColorType::new(rdr.read_u32::<BigEndian>()?)?;
@@ -280,6 +305,10 @@ impl Layer {
             width, height, kind, name, properties, pixels
         })
     }
+
+    pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
+        self.pixels.pixel(x, y)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -289,7 +318,7 @@ pub struct LayerColorType {
 }
 
 impl LayerColorType {
-    pub fn new(identifier: u32) -> Result<LayerColorType, Error> {
+    fn new(identifier: u32) -> Result<LayerColorType, Error> {
         let kind = ColorType::new(identifier / 2)?;
         let alpha = identifier % 2 == 1;
         Ok(LayerColorType {
@@ -308,7 +337,7 @@ pub struct PixelData {
 impl PixelData {
     /// Parses the (silly?) heirarchy structure in the xcf file into a pixel array
     /// Makes lots of assumptions! Only supports RGBA for now.
-    pub fn parse_heirarchy<R: Read + Seek>(mut rdr: R) -> Result<PixelData, Error> {
+    fn parse_heirarchy<R: Read + Seek>(mut rdr: R) -> Result<PixelData, Error> {
         // read the heirarchy
         let width = rdr.read_u32::<BigEndian>()? as usize;
         let height = rdr.read_u32::<BigEndian>()? as usize;
@@ -358,7 +387,7 @@ impl PixelData {
         Ok(PixelData { pixels, width, height })
     }
 
-    pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
+    fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
         if x >= self.width || y >= self.height {
             return None;
         }
@@ -380,7 +409,7 @@ pub struct TileCursor {
 // stuff we need to store within the "algorithm." A better design is very welcome! i should be
 // moved into feed as a local.
 impl TileCursor {
-    pub fn new(width: usize, height: usize, tx: usize, ty: usize, channels: usize) -> TileCursor {
+    fn new(width: usize, height: usize, tx: usize, ty: usize, channels: usize) -> TileCursor {
         TileCursor {
             width,
             height,
@@ -392,7 +421,7 @@ impl TileCursor {
     }
 
     /// Feed the cursor a stream starting at the beginning of an XCF tile structure.
-    pub fn feed<R: Read>(&mut self, mut rdr: R, pixels: &mut [RgbaPixel]) -> Result<(), Error> {
+    fn feed<R: Read>(&mut self, mut rdr: R, pixels: &mut [RgbaPixel]) -> Result<(), Error> {
         let twidth = cmp::min(self.x + 64, self.width) - self.x;
         let theight = cmp::min(self.y + 64, self.height) - self.y;
         let base_offset = self.y * self.width + self.x;

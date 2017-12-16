@@ -1,4 +1,11 @@
 //! Read pixel data from GIMP's native XCF files.
+//!
+//! See [`Xcf`] for usage (methods `open` and `load`). For extracting pixel data, you probably want
+//! to access a layer via `Xcf::layer` and `Layer::raw_sub_buffer`, which you can use to
+//! create `ImageBuffer`s from the `image` crate. You can also do direct pixel access via
+//! `Layer::pixel`.
+//!
+//! [`Xcf`]: struct.Xcf.html
 
 #[macro_use]
 extern crate derive_error;
@@ -309,6 +316,10 @@ impl Layer {
     pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
         self.pixels.pixel(x, y)
     }
+
+    pub fn raw_sub_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
+        self.pixels.raw_sub_buffer(x, y, width, height)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -327,7 +338,7 @@ impl LayerColorType {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PixelData {
     width: usize,
     height: usize,
@@ -387,11 +398,26 @@ impl PixelData {
         Ok(PixelData { pixels, width, height })
     }
 
-    fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
+    pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
         if x >= self.width || y >= self.height {
             return None;
         }
         Some(self.pixels[y * self.width + x])
+    }
+
+    /// Creates a raw sub buffer from self.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a pixel access is out of bounds.
+    pub fn raw_sub_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
+        let mut sub = Vec::with_capacity(width * height * 4);
+        for _y in y..(y + height) {
+            for _x in x..(x + width) {
+                sub.extend_from_slice(&self.pixel(_x, _y).unwrap().0);
+            }
+        }
+        return sub
     }
 }
 
@@ -472,6 +498,7 @@ impl TileCursor {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbaPixel(pub [u8; 4]);
 

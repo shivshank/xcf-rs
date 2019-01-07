@@ -20,6 +20,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::borrow::Cow;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -69,12 +70,19 @@ impl Xcf {
         })
     }
 
+    /// Get the width of the canvas.
     pub fn width(&self) -> u32 {
         self.header.width
     }
 
+    /// Get the height of the canvas.
     pub fn height(&self) -> u32 {
         self.header.height
+    }
+
+    // Get the dimensions (width, height) of the canvas.
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width(), self.height())
     }
 
     pub fn layer(&self, name: &str) -> Option<&Layer> {
@@ -317,8 +325,16 @@ impl Layer {
         self.pixels.pixel(x, y)
     }
 
-    pub fn raw_sub_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
-        self.pixels.raw_sub_buffer(x, y, width, height)
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
+    pub fn raw_rgba_buffer(&self) -> Cow<[RgbaPixel]> {
+        Cow::from(&self.pixels.pixels)
+    }
+
+    pub fn raw_sub_rgba_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
+        self.pixels.raw_sub_rgba_buffer(x, y, width, height)
     }
 }
 
@@ -338,6 +354,7 @@ impl LayerColorType {
     }
 }
 
+// TODO: Make this an enum? We should store a buffer that matches the channels present.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PixelData {
     width: usize,
@@ -410,10 +427,13 @@ impl PixelData {
     /// # Panics
     ///
     /// Panics if a pixel access is out of bounds.
-    pub fn raw_sub_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
+    pub fn raw_sub_rgba_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
         let mut sub = Vec::with_capacity(width * height * 4);
         for _y in y..(y + height) {
             for _x in x..(x + width) {
+                if _y > self.height || _x > self.width {
+                    panic!("Pixel access is out of bounds");
+                }
                 sub.extend_from_slice(&self.pixel(_x, _y).unwrap().0);
             }
         }
@@ -501,6 +521,24 @@ impl TileCursor {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RgbaPixel(pub [u8; 4]);
+
+impl RgbaPixel {
+    pub fn r(&self) -> u8 {
+        self.0[0]
+    }
+
+    pub fn g(&self) -> u8 {
+        self.0[1]
+    }
+
+    pub fn b(&self) -> u8 {
+        self.0[2]
+    }
+
+    pub fn a(&self) -> u8 {
+        self.0[3]
+    }
+}
 
 fn read_gimp_string<R: Read>(mut rdr: R) -> Result<String, Error> {
     let length = rdr.read_u32::<BigEndian>()?;

@@ -27,7 +27,7 @@ pub enum Error {
     Io(io::Error),
     Utf8(string::FromUtf8Error),
     InvalidFormat,
-    UnkownVersion,
+    UnknownVersion,
     NotSupported,
 }
 
@@ -121,7 +121,7 @@ impl XcfHeader {
                 b"v001" => Version::V1,
                 b"v002" => Version::V2,
                 b"v003" => Version::V3,
-                _ => return Err(Error::UnkownVersion),
+                _ => return Err(Error::UnknownVersion),
             }
         };
 

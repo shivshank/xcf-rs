@@ -11,16 +11,16 @@
 extern crate derive_error;
 extern crate byteorder;
 
-use byteorder::{ReadBytesExt, BigEndian};
+use byteorder::{BigEndian, ReadBytesExt};
 
-use std::string;
-use std::cmp;
-use std::io;
-use std::io::{Read, Seek, SeekFrom};
-use std::fs::File;
-use std::io::BufReader;
-use std::path::Path;
 use std::borrow::Cow;
+use std::cmp;
+use std::fs::File;
+use std::io;
+use std::io::BufReader;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+use std::string;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -59,15 +59,13 @@ impl Xcf {
             }
             let current_pos = rdr.seek(SeekFrom::Current(0))?;
             rdr.seek(SeekFrom::Start(layer_pointer as u64))?;
-            layers.push( Layer::parse(&mut rdr)? );
+            layers.push(Layer::parse(&mut rdr)?);
             rdr.seek(SeekFrom::Start(current_pos))?;
         }
 
         // TODO: Read channels
 
-        Ok(Xcf {
-            header, layers,
-        })
+        Ok(Xcf { header, layers })
     }
 
     /// Get the width of the canvas.
@@ -86,13 +84,11 @@ impl Xcf {
     }
 
     pub fn layer(&self, name: &str) -> Option<&Layer> {
-        self.layers.iter()
-            .find(|l| l.name == name)
+        self.layers.iter().find(|l| l.name == name)
     }
 
     pub fn layer_mut(&mut self, name: &str) -> Option<&mut Layer> {
-        self.layers.iter_mut()
-            .find(|l| l.name == name)
+        self.layers.iter_mut().find(|l| l.name == name)
     }
 }
 
@@ -139,7 +135,11 @@ impl XcfHeader {
         let properties = Property::parse_list(&mut rdr)?;
 
         Ok(XcfHeader {
-            version, width, height, color_type, properties,
+            version,
+            width,
+            height,
+            color_type,
+            properties,
         })
     }
 }
@@ -187,7 +187,7 @@ impl Property {
             PropertyPayload::ColorMap { colors, .. } => {
                 /* apparently due to a GIMP bug sometimes self.length will be n + 4 */
                 3 * colors + 4
-            },
+            }
             // this is the best we can do otherwise
             _ => self.length,
         }
@@ -198,7 +198,9 @@ impl Property {
         let length = rdr.read_u32::<BigEndian>()? as usize;
         let payload = PropertyPayload::parse(&mut rdr, kind, length)?;
         Ok(Property {
-            kind, length, payload,
+            kind,
+            length,
+            payload,
         })
     }
 
@@ -270,16 +272,17 @@ prop_ident_gen! {
 
 #[derive(Debug, PartialEq)]
 pub enum PropertyPayload {
-    ColorMap {
-        colors: usize,
-    },
+    ColorMap { colors: usize },
     End,
     Unknown(Vec<u8>),
 }
 
 impl PropertyPayload {
-    fn parse<R: Read>(mut rdr: R, kind: PropertyIdentifier, length: usize)
-            -> Result<PropertyPayload, Error> {
+    fn parse<R: Read>(
+        mut rdr: R,
+        kind: PropertyIdentifier,
+        length: usize,
+    ) -> Result<PropertyPayload, Error> {
         use self::PropertyIdentifier::*;
         Ok(match kind {
             PropEnd => PropertyPayload::End,
@@ -317,7 +320,12 @@ impl Layer {
         // TODO
         // let mptr = rdr.read_u32::<BigEndian>()?;
         Ok(Layer {
-            width, height, kind, name, properties, pixels
+            width,
+            height,
+            kind,
+            name,
+            properties,
+            pixels,
         })
     }
 
@@ -348,9 +356,7 @@ impl LayerColorType {
     fn new(identifier: u32) -> Result<LayerColorType, Error> {
         let kind = ColorType::new(identifier / 2)?;
         let alpha = identifier % 2 == 1;
-        Ok(LayerColorType {
-            alpha, kind,
-        })
+        Ok(LayerColorType { alpha, kind })
     }
 }
 
@@ -359,7 +365,7 @@ impl LayerColorType {
 pub struct PixelData {
     width: usize,
     height: usize,
-    pixels: Vec<RgbaPixel>
+    pixels: Vec<RgbaPixel>,
 }
 
 impl PixelData {
@@ -412,7 +418,11 @@ impl PixelData {
         }*/
         // we are now at the end of the heirarchy structure.
 
-        Ok(PixelData { pixels, width, height })
+        Ok(PixelData {
+            pixels,
+            width,
+            height,
+        })
     }
 
     pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
@@ -437,7 +447,7 @@ impl PixelData {
                 sub.extend_from_slice(&self.pixel(_x, _y).unwrap().0);
             }
         }
-        return sub
+        return sub;
     }
 }
 
@@ -476,7 +486,8 @@ impl TileCursor {
         while channel < self.channels {
             while self.i < twidth * theight {
                 let determinant = rdr.read_u8()? as u32;
-                if determinant < 127 { // A short run of identical bytes
+                if determinant < 127 {
+                    // A short run of identical bytes
                     let run = (determinant + 1) as usize;
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
@@ -484,7 +495,8 @@ impl TileCursor {
                         pixels[index].0[channel] = v;
                     }
                     self.i += run;
-                } else if determinant == 127 { // A long run of identical bytes
+                } else if determinant == 127 {
+                    // A long run of identical bytes
                     let run = rdr.read_u16::<BigEndian>()? as usize;
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
@@ -492,7 +504,8 @@ impl TileCursor {
                         pixels[index].0[channel] = v;
                     }
                     self.i += run;
-                } else if determinant == 128 { // A long run of different bytes
+                } else if determinant == 128 {
+                    // A long run of different bytes
                     let stream_run = rdr.read_u16::<BigEndian>()? as usize;
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
@@ -500,7 +513,8 @@ impl TileCursor {
                         pixels[index].0[channel] = v;
                     }
                     self.i += stream_run;
-                } else { // A short run of different bytes
+                } else {
+                    // A short run of different bytes
                     let stream_run = (256 - determinant) as usize;
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;

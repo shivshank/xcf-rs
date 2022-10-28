@@ -1,6 +1,7 @@
 [package]
 name = "xcf"
 version = "0.3.0"
+edition = "2021"
 authors = ["shivshank"]
 description = "A basic standalone GIMP XCF library in Rust."
 

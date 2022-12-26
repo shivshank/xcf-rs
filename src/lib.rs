@@ -54,13 +54,13 @@ impl Xcf {
 
         let mut layers = Vec::new();
         loop {
-            let layer_pointer = rdr.read_u32::<BigEndian>()?;
+            let layer_pointer = rdr.read_uint::<BigEndian>(header.version.bytes_per_offset())?;
             if layer_pointer == 0 {
                 break;
             }
             let current_pos = rdr.seek(SeekFrom::Current(0))?;
-            rdr.seek(SeekFrom::Start(layer_pointer as u64))?;
-            layers.push( Layer::parse(&mut rdr)? );
+            rdr.seek(SeekFrom::Start(layer_pointer))?;
+            layers.push( Layer::parse(&mut rdr, header.version)? );
             rdr.seek(SeekFrom::Start(current_pos))?;
         }
 
@@ -116,7 +116,7 @@ impl XcfHeader {
         }
 
         let version = Version::parse(&mut rdr)?;
-        if version.num() > 3 {
+        if version.num() > 11 {
             return Err(Error::UnknownVersion);
         }
 
@@ -161,6 +161,14 @@ impl Version {
 
     fn num(self) -> u16 {
         self.0
+    }
+
+    fn bytes_per_offset(self) -> usize {
+        if self.0 >= 11 {
+            8
+        } else {
+            4
+        }
     }
 }
 
@@ -402,19 +410,19 @@ pub struct Layer {
 }
 
 impl Layer {
-    fn parse<R: Read + Seek>(mut rdr: R) -> Result<Layer, Error> {
+    fn parse<R: Read + Seek>(mut rdr: R, version: Version) -> Result<Layer, Error> {
         let width = rdr.read_u32::<BigEndian>()?;
         let height = rdr.read_u32::<BigEndian>()?;
         let kind = LayerColorType::new(rdr.read_u32::<BigEndian>()?)?;
         let name = read_gimp_string(&mut rdr)?;
         let properties = Property::parse_list(&mut rdr)?;
-        let hptr = rdr.read_u32::<BigEndian>()?;
+        let hptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         let current_pos = rdr.seek(SeekFrom::Current(0))?;
-        rdr.seek(SeekFrom::Start(hptr as u64))?;
-        let pixels = PixelData::parse_heirarchy(&mut rdr)?;
+        rdr.seek(SeekFrom::Start(hptr))?;
+        let pixels = PixelData::parse_heirarchy(&mut rdr, version)?;
         rdr.seek(SeekFrom::Start(current_pos))?;
         // TODO
-        // let mptr = rdr.read_u32::<BigEndian>()?;
+        // let mptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         Ok(Layer {
             width, height, kind, name, properties, pixels
         })
@@ -464,7 +472,7 @@ pub struct PixelData {
 impl PixelData {
     /// Parses the (silly?) heirarchy structure in the xcf file into a pixel array
     /// Makes lots of assumptions! Only supports RGBA for now.
-    fn parse_heirarchy<R: Read + Seek>(mut rdr: R) -> Result<PixelData, Error> {
+    fn parse_heirarchy<R: Read + Seek>(mut rdr: R, version: Version) -> Result<PixelData, Error> {
         // read the heirarchy
         let width = rdr.read_u32::<BigEndian>()? as usize;
         let height = rdr.read_u32::<BigEndian>()? as usize;
@@ -472,9 +480,9 @@ impl PixelData {
         if bpp != 3 && bpp != 4 {
             return Err(Error::NotSupported);
         }
-        let lptr = rdr.read_u32::<BigEndian>()?;
+        let lptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         let _dummpy_ptr_pos = rdr.seek(SeekFrom::Current(0))?;
-        rdr.seek(SeekFrom::Start(lptr as u64))?;
+        rdr.seek(SeekFrom::Start(lptr))?;
         // read the level
         let level_width = rdr.read_u32::<BigEndian>()? as usize;
         let level_height = rdr.read_u32::<BigEndian>()? as usize;
@@ -489,9 +497,9 @@ impl PixelData {
         let tiles_y = (height as f32 / 64.0).ceil() as usize;
         for ty in 0..tiles_y {
             for tx in 0..tiles_x {
-                let tptr = rdr.read_u32::<BigEndian>()?;
+                let tptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
                 next_tptr_pos = rdr.seek(SeekFrom::Current(0))?;
-                rdr.seek(SeekFrom::Start(tptr as u64))?;
+                rdr.seek(SeekFrom::Start(tptr))?;
 
                 let mut cursor = TileCursor::new(width, height, tx, ty, bpp);
                 cursor.feed(&mut rdr, &mut pixels)?;

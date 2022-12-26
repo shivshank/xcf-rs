@@ -113,17 +113,10 @@ impl XcfHeader {
             return Err(Error::InvalidFormat);
         }
 
-        let version = {
-            let mut v = [0u8; 4];
-            rdr.read_exact(&mut v)?;
-            match &v {
-                b"file" => Version::V0,
-                b"v001" => Version::V1,
-                b"v002" => Version::V2,
-                b"v003" => Version::V3,
-                _ => return Err(Error::UnknownVersion),
-            }
-        };
+        let version = Version::parse(&mut rdr)?;
+        if version.num() > 3 {
+            return Err(Error::UnknownVersion);
+        }
 
         rdr.read_exact(&mut [0u8])?;
 
@@ -144,12 +137,23 @@ impl XcfHeader {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Version {
-    V0,
-    V1,
-    V2,
-    V3,
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Version(u16);
+
+impl Version {
+    fn parse<R: Read>(mut rdr: R) -> Result<Self, Error> {
+        let mut v = [0; 4];
+        rdr.read_exact(&mut v)?;
+        match &v {
+            b"file" => Ok(Self(0)),
+            [b'v', ver @ .. ] => Ok(Self(String::from_utf8_lossy(ver).parse().map_err(|_| Error::UnknownVersion)?)),
+            _ => Err(Error::UnknownVersion),
+        }
+    }
+
+    fn num(self) -> u16 {
+        self.0
+    }
 }
 
 #[repr(u32)]

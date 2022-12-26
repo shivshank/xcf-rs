@@ -28,6 +28,7 @@ pub enum Error {
     Utf8(string::FromUtf8Error),
     InvalidFormat,
     UnknownVersion,
+    InvalidPrecision,
     NotSupported,
 }
 
@@ -102,6 +103,7 @@ pub struct XcfHeader {
     pub width: u32,
     pub height: u32,
     pub color_type: ColorType,
+    pub precision: Precision,
     pub properties: Vec<Property>,
 }
 
@@ -129,10 +131,16 @@ impl XcfHeader {
             unimplemented!("Only RGB/RGBA color images supported");
         }
 
+        let precision = if version.num() >= 4 {
+            Precision::parse(&mut rdr, version)?
+        } else {
+            Precision::NonLinearU8
+        };
+
         let properties = Property::parse_list(&mut rdr)?;
 
         Ok(XcfHeader {
-            version, width, height, color_type, properties,
+            version, width, height, color_type, precision, properties,
         })
     }
 }
@@ -172,6 +180,79 @@ impl ColorType {
             1 => Grayscale,
             2 => Indexed,
             _ => return Err(Error::InvalidFormat),
+        })
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Precision {
+    LinearU8,
+    NonLinearU8,
+    PerceptualU8,
+    LinearU16,
+    NonLinearU16,
+    PerceptualU16,
+    LinearU32,
+    NonLinearU32,
+    PerceptualU32,
+    LinearF16,
+    NonLinearF16,
+    PerceptualF16,
+    LinearF32,
+    NonLinearF32,
+    PerceptualF32,
+    LinearF64,
+    NonLinearF64,
+    PerceptualF64,
+}
+
+impl Precision {
+    fn parse<R: Read>(mut rdr: R, version: Version) -> Result<Self, Error> {
+        let precision = rdr.read_u32::<BigEndian>()?;
+        Ok(match version.num() {
+            4 => match precision {
+                0 => Precision::NonLinearU8,
+                1 => Precision::NonLinearU16,
+                2 => Precision::LinearU32,
+                3 => Precision::LinearF16,
+                4 => Precision::LinearF32,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            5..=6 => match precision {
+                100 => Precision::LinearU8,
+                150 => Precision::NonLinearU8,
+                200 => Precision::LinearU16,
+                250 => Precision::NonLinearU16,
+                300 => Precision::LinearU32,
+                350 => Precision::NonLinearU32,
+                400 => Precision::LinearF16,
+                450 => Precision::NonLinearF16,
+                500 => Precision::LinearF32,
+                550 => Precision::NonLinearF32,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            7.. => match precision {
+                100 => Precision::LinearU8,
+                150 => Precision::NonLinearU8,
+                175 => Precision::PerceptualU8,
+                200 => Precision::LinearU16,
+                250 => Precision::NonLinearU16,
+                275 => Precision::PerceptualU16,
+                300 => Precision::LinearU32,
+                350 => Precision::NonLinearU32,
+                375 => Precision::PerceptualU32,
+                500 => Precision::LinearF16,
+                550 => Precision::NonLinearF16,
+                575 => Precision::PerceptualF16,
+                600 => Precision::LinearF32,
+                650 => Precision::NonLinearF32,
+                675 => Precision::PerceptualF32,
+                700 => Precision::LinearF64,
+                750 => Precision::NonLinearF64,
+                775 => Precision::PerceptualF64,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            _ => return Err(Error::InvalidPrecision),
         })
     }
 }

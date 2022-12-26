@@ -219,7 +219,7 @@ impl Property {
 macro_rules! prop_ident_gen {
     (
         pub enum PropertyIdentifier {
-            Unknown,
+            Unknown(u32),
             $(
                 $prop:ident = $val:expr
             ),+,
@@ -234,7 +234,7 @@ macro_rules! prop_ident_gen {
             // we have to put this at the end, since otherwise it will try to have value zero,
             // we really don't care what it is as long as it doesn't conflict with anything else
             // (however in the macro we have to put it first since it's a parsing issue)
-            Unknown,
+            Unknown(u32),
         }
 
         impl PropertyIdentifier {
@@ -243,7 +243,7 @@ macro_rules! prop_ident_gen {
                     $(
                         $val => PropertyIdentifier::$prop
                     ),+,
-                    _ => PropertyIdentifier::Unknown,
+                    _ => PropertyIdentifier::Unknown(prop),
                 }
             }
         }
@@ -252,19 +252,33 @@ macro_rules! prop_ident_gen {
 
 prop_ident_gen! {
     pub enum PropertyIdentifier {
-        Unknown,
+        Unknown(u32),
         PropEnd = 0,
         PropColormap = 1,
+        PropActiveLayer = 2,
         PropOpacity = 6,
+        PropMode = 7,
         PropVisible = 8,
         PropLinked = 9,
+        PropLockAlpha = 10,
+        PropApplyMask = 11,
+        PropEditMask = 12,
+        PropShowMask = 13,
+        PropOffsets = 15,
         PropCompression = 17,
         TypeIdentification = 18,
         PropResolution = 19,
         PropTattoo = 20,
         PropParasites = 21,
+        PropUnit = 22,
         PropPaths = 23,
         PropLockContent = 28,
+        PropLockPosition = 32,
+        PropFloatOpacity = 33,
+        PropColorTag = 34,
+        PropCompositeMode = 35,
+        PropCompositeSpace = 36,
+        PropBlendSpace = 37,
     }
 }
 

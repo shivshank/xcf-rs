@@ -13,4 +13,4 @@ repository = "https://github.com/shivshank/xcf-rs"
 
 [dependencies]
 derive-error = "0.0.4"
-byteorder = "1"
+byteorder = "1.4.3"

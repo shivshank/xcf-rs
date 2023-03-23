@@ -2,14 +2,18 @@
 
 [![Latest Version](https://img.shields.io/crates/v/xcf.svg)](https://crates.io/crates/xcf)
 
-I wrote this for extracting layer and pixel data from XCF files for my game's art pipeline.
+Designed for extracting layer and pixel data from XCF files. 
 
-This library has a few notable limitations presently:
- - it always returns RGBA pixels; I have updated the methods to make this clear
-    - this can also be fixed! I'll probably get around to it eventually.
- - it can only handle RGB or RGBA images, not grayscale or indexed, with or without alpha.
+I originally made this as part of an art pipeline for a game idea, as such it's missing 
+support for a lot of features (I only needed to pluck pixel data from a few layers).
 
-Tests needed. Contributions welcome.
+ - results are always returned in RGBA pixels, regardless of original format
+ - supports RGB or RGBA images, but not grayscale or indexed
+
+(There is a test for XCF files with "better compression" enabled, but this isn't supported
+yet, so it is likely you'll see the CI as failed.)
+
+Contributions welcome.
 
 # Example
 

@@ -11,16 +11,16 @@
 extern crate derive_error;
 extern crate byteorder;
 
-use byteorder::{ReadBytesExt, BigEndian};
+use byteorder::{BigEndian, ReadBytesExt};
 
-use std::string;
-use std::cmp;
-use std::io;
-use std::io::{Read, Seek, SeekFrom};
-use std::fs::File;
-use std::io::BufReader;
-use std::path::Path;
 use std::borrow::Cow;
+use std::cmp;
+use std::fs::File;
+use std::io;
+use std::io::BufReader;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+use std::string;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -35,6 +35,10 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Xcf {
     pub header: XcfHeader,
+    /// List of layers in the XCF file, in the order they are stored in the file.
+    /// (I believe this is top layer to bottom layer)
+    ///
+    /// See [`Xcf::layer`](Xcf::layer) to get a layer by name.
     pub layers: Vec<Layer>,
 }
 
@@ -58,17 +62,15 @@ impl Xcf {
             if layer_pointer == 0 {
                 break;
             }
-            let current_pos = rdr.seek(SeekFrom::Current(0))?;
+            let current_pos = rdr.stream_position()?;
             rdr.seek(SeekFrom::Start(layer_pointer))?;
-            layers.push( Layer::parse(&mut rdr, header.version)? );
+            layers.push(Layer::parse(&mut rdr, header.version)?);
             rdr.seek(SeekFrom::Start(current_pos))?;
         }
 
         // TODO: Read channels
 
-        Ok(Xcf {
-            header, layers,
-        })
+        Ok(Xcf { header, layers })
     }
 
     /// Get the width of the canvas.
@@ -86,14 +88,14 @@ impl Xcf {
         (self.width(), self.height())
     }
 
+    /// Get a reference to a layer by `name`.
     pub fn layer(&self, name: &str) -> Option<&Layer> {
-        self.layers.iter()
-            .find(|l| l.name == name)
+        self.layers.iter().find(|l| l.name == name)
     }
 
+    /// Get a mutable reference to a layer by `name`.
     pub fn layer_mut(&mut self, name: &str) -> Option<&mut Layer> {
-        self.layers.iter_mut()
-            .find(|l| l.name == name)
+        self.layers.iter_mut().find(|l| l.name == name)
     }
 }
 
@@ -140,7 +142,12 @@ impl XcfHeader {
         let properties = Property::parse_list(&mut rdr)?;
 
         Ok(XcfHeader {
-            version, width, height, color_type, precision, properties,
+            version,
+            width,
+            height,
+            color_type,
+            precision,
+            properties,
         })
     }
 }
@@ -154,7 +161,11 @@ impl Version {
         rdr.read_exact(&mut v)?;
         match &v {
             b"file" => Ok(Self(0)),
-            [b'v', ver @ .. ] => Ok(Self(String::from_utf8_lossy(ver).parse().map_err(|_| Error::UnknownVersion)?)),
+            [b'v', ver @ ..] => Ok(Self(
+                String::from_utf8_lossy(ver)
+                    .parse()
+                    .map_err(|_| Error::UnknownVersion)?,
+            )),
             _ => Err(Error::UnknownVersion),
         }
     }
@@ -225,7 +236,7 @@ impl Precision {
                 3 => Precision::LinearF16,
                 4 => Precision::LinearF32,
                 _ => return Err(Error::InvalidPrecision),
-            }
+            },
             5..=6 => match precision {
                 100 => Precision::LinearU8,
                 150 => Precision::NonLinearU8,
@@ -238,7 +249,7 @@ impl Precision {
                 500 => Precision::LinearF32,
                 550 => Precision::NonLinearF32,
                 _ => return Err(Error::InvalidPrecision),
-            }
+            },
             7.. => match precision {
                 100 => Precision::LinearU8,
                 150 => Precision::NonLinearU8,
@@ -259,7 +270,7 @@ impl Precision {
                 750 => Precision::NonLinearF64,
                 775 => Precision::PerceptualF64,
                 _ => return Err(Error::InvalidPrecision),
-            }
+            },
             _ => return Err(Error::InvalidPrecision),
         })
     }
@@ -280,7 +291,7 @@ impl Property {
             PropertyPayload::ColorMap { colors, .. } => {
                 /* apparently due to a GIMP bug sometimes self.length will be n + 4 */
                 3 * colors + 4
-            },
+            }
             // this is the best we can do otherwise
             _ => self.length,
         }
@@ -291,7 +302,9 @@ impl Property {
         let length = rdr.read_u32::<BigEndian>()? as usize;
         let payload = PropertyPayload::parse(&mut rdr, kind, length)?;
         Ok(Property {
-            kind, length, payload,
+            kind,
+            length,
+            payload,
         })
     }
 
@@ -377,16 +390,17 @@ prop_ident_gen! {
 
 #[derive(Debug, PartialEq)]
 pub enum PropertyPayload {
-    ColorMap {
-        colors: usize,
-    },
+    ColorMap { colors: usize },
     End,
     Unknown(Vec<u8>),
 }
 
 impl PropertyPayload {
-    fn parse<R: Read>(mut rdr: R, kind: PropertyIdentifier, length: usize)
-            -> Result<PropertyPayload, Error> {
+    fn parse<R: Read>(
+        mut rdr: R,
+        kind: PropertyIdentifier,
+        length: usize,
+    ) -> Result<PropertyPayload, Error> {
         use self::PropertyIdentifier::*;
         Ok(match kind {
             PropEnd => PropertyPayload::End,
@@ -417,14 +431,19 @@ impl Layer {
         let name = read_gimp_string(&mut rdr)?;
         let properties = Property::parse_list(&mut rdr)?;
         let hptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-        let current_pos = rdr.seek(SeekFrom::Current(0))?;
+        let current_pos = rdr.stream_position()?;
         rdr.seek(SeekFrom::Start(hptr))?;
         let pixels = PixelData::parse_hierarchy(&mut rdr, version)?;
         rdr.seek(SeekFrom::Start(current_pos))?;
         // TODO
         // let mptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         Ok(Layer {
-            width, height, kind, name, properties, pixels
+            width,
+            height,
+            kind,
+            name,
+            properties,
+            pixels,
         })
     }
 
@@ -455,9 +474,7 @@ impl LayerColorType {
     fn new(identifier: u32) -> Result<LayerColorType, Error> {
         let kind = ColorType::new(identifier / 2)?;
         let alpha = identifier % 2 == 1;
-        Ok(LayerColorType {
-            alpha, kind,
-        })
+        Ok(LayerColorType { alpha, kind })
     }
 }
 
@@ -466,7 +483,7 @@ impl LayerColorType {
 pub struct PixelData {
     pub width: u32,
     pub height: u32,
-    pub pixels: Vec<RgbaPixel>
+    pub pixels: Vec<RgbaPixel>,
 }
 
 impl PixelData {
@@ -481,7 +498,7 @@ impl PixelData {
             return Err(Error::NotSupported);
         }
         let lptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-        let _dummpy_ptr_pos = rdr.seek(SeekFrom::Current(0))?;
+        let _dummpy_ptr_pos = rdr.stream_position()?;
         rdr.seek(SeekFrom::Start(lptr))?;
         // read the level
         let level_width = rdr.read_u32::<BigEndian>()?;
@@ -498,7 +515,7 @@ impl PixelData {
         for ty in 0..tiles_y {
             for tx in 0..tiles_x {
                 let tptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-                next_tptr_pos = rdr.seek(SeekFrom::Current(0))?;
+                next_tptr_pos = rdr.stream_position()?;
                 rdr.seek(SeekFrom::Start(tptr))?;
 
                 let mut cursor = TileCursor::new(width, height, tx, ty, bpp);
@@ -519,7 +536,11 @@ impl PixelData {
         }*/
         // we are now at the end of the heirarchy structure.
 
-        Ok(PixelData { pixels, width, height })
+        Ok(PixelData {
+            pixels,
+            width,
+            height,
+        })
     }
 
     pub fn pixel(&self, x: u32, y: u32) -> Option<RgbaPixel> {
@@ -583,7 +604,8 @@ impl TileCursor {
         while channel < self.channels {
             while self.i < twidth * theight {
                 let determinant = rdr.read_u8()?;
-                if determinant < 127 { // A short run of identical bytes
+                if determinant < 127 {
+                    // A short run of identical bytes
                     let run = u32::from(determinant + 1);
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
@@ -591,7 +613,8 @@ impl TileCursor {
                         pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += run;
-                } else if determinant == 127 { // A long run of identical bytes
+                } else if determinant == 127 {
+                    // A long run of identical bytes
                     let run = u32::from(rdr.read_u16::<BigEndian>()?);
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
@@ -599,7 +622,8 @@ impl TileCursor {
                         pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += run;
-                } else if determinant == 128 { // A long run of different bytes
+                } else if determinant == 128 {
+                    // A long run of different bytes
                     let stream_run = u32::from(rdr.read_u16::<BigEndian>()?);
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
@@ -607,7 +631,8 @@ impl TileCursor {
                         pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += stream_run;
-                } else { // A short run of different bytes
+                } else {
+                    // A short run of different bytes
                     let stream_run = 256 - u32::from(determinant);
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;

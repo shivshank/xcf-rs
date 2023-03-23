@@ -9,9 +9,8 @@ support for a lot of features (I only needed to pluck pixel data from a few laye
 
  - results are always returned in RGBA pixels, regardless of original format
  - supports RGB or RGBA images, but not grayscale or indexed
-
-(There is a test for XCF files with "better compression" enabled, but this isn't supported
-yet, so it is likely you'll see the CI as failed.)
+ - XCF files with better compression are not supported (there is an ignored failing test 
+   for this, should someone like to add support)
 
 Contributions welcome.
 

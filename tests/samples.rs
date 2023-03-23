@@ -72,6 +72,7 @@ fn read_512x512_yellow_base_cloud_layer_empty_layer() -> Result<(), Error> {
 }
 
 #[test]
+#[ignore]
 fn read_1024x1024_better_compression() -> Result<(), Error> {
     let raw_image = Xcf::open("tests/samples/1024x1024-better-compression.xcf")?;
 

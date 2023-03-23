@@ -4,6 +4,10 @@ version = "0.4.0"
 edition = "2021"
 authors = ["shivshank"]
 description = "A basic standalone GIMP XCF library in Rust."
+include = [
+    "**/*.rs",
+    "Cargo.toml",
+]
 
 license = "Unlicense"
 readme = "README.md"

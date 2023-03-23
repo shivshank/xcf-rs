@@ -24,12 +24,16 @@ fn read_245x6734_odd_size_odd_layer() -> Result<(), Error> {
 
     assert_eq!(raw_image.dimensions(), (246, 6734));
 
-    assert_eq!(raw_image.layers[0].name, "Background");
-    assert_eq!(raw_image.layers[0].dimensions(), (246, 6734));
+    assert!(raw_image.layer("Background").is_some());
+    assert!(raw_image.layer("Layer 2").is_some());
+    assert!(raw_image.layer("Layer 3").is_none());
 
-    assert_eq!(raw_image.layers[1].name, "Layer 1");
-    // TODO: check offset
-    assert_eq!(raw_image.layers[1].dimensions(), (200, 200));
+    assert_eq!(raw_image.layers[1].name, "Background");
+    assert_eq!(raw_image.layers[1].dimensions(), (246, 6734));
+
+    assert_eq!(raw_image.layers[0].name, "Layer 2");
+    // TODO: check layer offset
+    assert_eq!(raw_image.layers[0].dimensions(), (200, 200));
 
     Ok(())
 }

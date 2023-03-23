@@ -44,12 +44,12 @@ fn read_512x512_base_with_alpha() -> Result<(), Error> {
 
     assert_eq!(raw_image.dimensions(), (512, 512));
     assert_eq!(
-        raw_image.layers[0].pixel(0, 0).unwrap().0,
-        [215, 194, 78, 128]
+        raw_image.layers[2].pixel(0, 0).unwrap().0,
+        [215, 194, 78, 255]
     );
     assert_eq!(
-        raw_image.layers[0].pixel(1, 0).unwrap().0,
-        [215, 194, 78, 50]
+        raw_image.layers[2].pixel(1, 0).unwrap().0,
+        [215, 194, 78, 128]
     ); // TODO: could be an OBOE
 
     // TODO: check has alpha

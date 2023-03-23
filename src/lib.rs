@@ -28,6 +28,7 @@ pub enum Error {
     Utf8(string::FromUtf8Error),
     InvalidFormat,
     UnknownVersion,
+    InvalidPrecision,
     NotSupported,
 }
 
@@ -53,13 +54,13 @@ impl Xcf {
 
         let mut layers = Vec::new();
         loop {
-            let layer_pointer = rdr.read_u32::<BigEndian>()?;
+            let layer_pointer = rdr.read_uint::<BigEndian>(header.version.bytes_per_offset())?;
             if layer_pointer == 0 {
                 break;
             }
             let current_pos = rdr.seek(SeekFrom::Current(0))?;
-            rdr.seek(SeekFrom::Start(layer_pointer as u64))?;
-            layers.push( Layer::parse(&mut rdr)? );
+            rdr.seek(SeekFrom::Start(layer_pointer))?;
+            layers.push( Layer::parse(&mut rdr, header.version)? );
             rdr.seek(SeekFrom::Start(current_pos))?;
         }
 
@@ -102,6 +103,7 @@ pub struct XcfHeader {
     pub width: u32,
     pub height: u32,
     pub color_type: ColorType,
+    pub precision: Precision,
     pub properties: Vec<Property>,
 }
 
@@ -113,17 +115,10 @@ impl XcfHeader {
             return Err(Error::InvalidFormat);
         }
 
-        let version = {
-            let mut v = [0u8; 4];
-            rdr.read_exact(&mut v)?;
-            match &v {
-                b"file" => Version::V0,
-                b"v001" => Version::V1,
-                b"v002" => Version::V2,
-                b"v003" => Version::V3,
-                _ => return Err(Error::UnknownVersion),
-            }
-        };
+        let version = Version::parse(&mut rdr)?;
+        if version.num() > 11 {
+            return Err(Error::UnknownVersion);
+        }
 
         rdr.read_exact(&mut [0u8])?;
 
@@ -136,20 +131,45 @@ impl XcfHeader {
             unimplemented!("Only RGB/RGBA color images supported");
         }
 
+        let precision = if version.num() >= 4 {
+            Precision::parse(&mut rdr, version)?
+        } else {
+            Precision::NonLinearU8
+        };
+
         let properties = Property::parse_list(&mut rdr)?;
 
         Ok(XcfHeader {
-            version, width, height, color_type, properties,
+            version, width, height, color_type, precision, properties,
         })
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Version {
-    V0,
-    V1,
-    V2,
-    V3,
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Version(u16);
+
+impl Version {
+    fn parse<R: Read>(mut rdr: R) -> Result<Self, Error> {
+        let mut v = [0; 4];
+        rdr.read_exact(&mut v)?;
+        match &v {
+            b"file" => Ok(Self(0)),
+            [b'v', ver @ .. ] => Ok(Self(String::from_utf8_lossy(ver).parse().map_err(|_| Error::UnknownVersion)?)),
+            _ => Err(Error::UnknownVersion),
+        }
+    }
+
+    fn num(self) -> u16 {
+        self.0
+    }
+
+    fn bytes_per_offset(self) -> usize {
+        if self.0 >= 11 {
+            8
+        } else {
+            4
+        }
+    }
 }
 
 #[repr(u32)]
@@ -168,6 +188,79 @@ impl ColorType {
             1 => Grayscale,
             2 => Indexed,
             _ => return Err(Error::InvalidFormat),
+        })
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum Precision {
+    LinearU8,
+    NonLinearU8,
+    PerceptualU8,
+    LinearU16,
+    NonLinearU16,
+    PerceptualU16,
+    LinearU32,
+    NonLinearU32,
+    PerceptualU32,
+    LinearF16,
+    NonLinearF16,
+    PerceptualF16,
+    LinearF32,
+    NonLinearF32,
+    PerceptualF32,
+    LinearF64,
+    NonLinearF64,
+    PerceptualF64,
+}
+
+impl Precision {
+    fn parse<R: Read>(mut rdr: R, version: Version) -> Result<Self, Error> {
+        let precision = rdr.read_u32::<BigEndian>()?;
+        Ok(match version.num() {
+            4 => match precision {
+                0 => Precision::NonLinearU8,
+                1 => Precision::NonLinearU16,
+                2 => Precision::LinearU32,
+                3 => Precision::LinearF16,
+                4 => Precision::LinearF32,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            5..=6 => match precision {
+                100 => Precision::LinearU8,
+                150 => Precision::NonLinearU8,
+                200 => Precision::LinearU16,
+                250 => Precision::NonLinearU16,
+                300 => Precision::LinearU32,
+                350 => Precision::NonLinearU32,
+                400 => Precision::LinearF16,
+                450 => Precision::NonLinearF16,
+                500 => Precision::LinearF32,
+                550 => Precision::NonLinearF32,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            7.. => match precision {
+                100 => Precision::LinearU8,
+                150 => Precision::NonLinearU8,
+                175 => Precision::PerceptualU8,
+                200 => Precision::LinearU16,
+                250 => Precision::NonLinearU16,
+                275 => Precision::PerceptualU16,
+                300 => Precision::LinearU32,
+                350 => Precision::NonLinearU32,
+                375 => Precision::PerceptualU32,
+                500 => Precision::LinearF16,
+                550 => Precision::NonLinearF16,
+                575 => Precision::PerceptualF16,
+                600 => Precision::LinearF32,
+                650 => Precision::NonLinearF32,
+                675 => Precision::PerceptualF32,
+                700 => Precision::LinearF64,
+                750 => Precision::NonLinearF64,
+                775 => Precision::PerceptualF64,
+                _ => return Err(Error::InvalidPrecision),
+            }
+            _ => return Err(Error::InvalidPrecision),
         })
     }
 }
@@ -219,7 +312,7 @@ impl Property {
 macro_rules! prop_ident_gen {
     (
         pub enum PropertyIdentifier {
-            Unknown,
+            Unknown(u32),
             $(
                 $prop:ident = $val:expr
             ),+,
@@ -234,7 +327,7 @@ macro_rules! prop_ident_gen {
             // we have to put this at the end, since otherwise it will try to have value zero,
             // we really don't care what it is as long as it doesn't conflict with anything else
             // (however in the macro we have to put it first since it's a parsing issue)
-            Unknown,
+            Unknown(u32),
         }
 
         impl PropertyIdentifier {
@@ -243,7 +336,7 @@ macro_rules! prop_ident_gen {
                     $(
                         $val => PropertyIdentifier::$prop
                     ),+,
-                    _ => PropertyIdentifier::Unknown,
+                    _ => PropertyIdentifier::Unknown(prop),
                 }
             }
         }
@@ -252,19 +345,33 @@ macro_rules! prop_ident_gen {
 
 prop_ident_gen! {
     pub enum PropertyIdentifier {
-        Unknown,
+        Unknown(u32),
         PropEnd = 0,
         PropColormap = 1,
+        PropActiveLayer = 2,
         PropOpacity = 6,
+        PropMode = 7,
         PropVisible = 8,
         PropLinked = 9,
+        PropLockAlpha = 10,
+        PropApplyMask = 11,
+        PropEditMask = 12,
+        PropShowMask = 13,
+        PropOffsets = 15,
         PropCompression = 17,
         TypeIdentification = 18,
         PropResolution = 19,
         PropTattoo = 20,
         PropParasites = 21,
+        PropUnit = 22,
         PropPaths = 23,
         PropLockContent = 28,
+        PropLockPosition = 32,
+        PropFloatOpacity = 33,
+        PropColorTag = 34,
+        PropCompositeMode = 35,
+        PropCompositeSpace = 36,
+        PropBlendSpace = 37,
     }
 }
 
@@ -303,25 +410,25 @@ pub struct Layer {
 }
 
 impl Layer {
-    fn parse<R: Read + Seek>(mut rdr: R) -> Result<Layer, Error> {
+    fn parse<R: Read + Seek>(mut rdr: R, version: Version) -> Result<Layer, Error> {
         let width = rdr.read_u32::<BigEndian>()?;
         let height = rdr.read_u32::<BigEndian>()?;
         let kind = LayerColorType::new(rdr.read_u32::<BigEndian>()?)?;
         let name = read_gimp_string(&mut rdr)?;
         let properties = Property::parse_list(&mut rdr)?;
-        let hptr = rdr.read_u32::<BigEndian>()?;
+        let hptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         let current_pos = rdr.seek(SeekFrom::Current(0))?;
-        rdr.seek(SeekFrom::Start(hptr as u64))?;
-        let pixels = PixelData::parse_heirarchy(&mut rdr)?;
+        rdr.seek(SeekFrom::Start(hptr))?;
+        let pixels = PixelData::parse_hierarchy(&mut rdr, version)?;
         rdr.seek(SeekFrom::Start(current_pos))?;
         // TODO
-        // let mptr = rdr.read_u32::<BigEndian>()?;
+        // let mptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         Ok(Layer {
             width, height, kind, name, properties, pixels
         })
     }
 
-    pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
+    pub fn pixel(&self, x: u32, y: u32) -> Option<RgbaPixel> {
         self.pixels.pixel(x, y)
     }
 
@@ -333,7 +440,7 @@ impl Layer {
         Cow::from(&self.pixels.pixels)
     }
 
-    pub fn raw_sub_rgba_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
+    pub fn raw_sub_rgba_buffer(&self, x: u32, y: u32, width: u32, height: u32) -> Vec<u8> {
         self.pixels.raw_sub_rgba_buffer(x, y, width, height)
     }
 }
@@ -357,28 +464,28 @@ impl LayerColorType {
 // TODO: Make this an enum? We should store a buffer that matches the channels present.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PixelData {
-    width: usize,
-    height: usize,
-    pixels: Vec<RgbaPixel>
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<RgbaPixel>
 }
 
 impl PixelData {
     /// Parses the (silly?) heirarchy structure in the xcf file into a pixel array
     /// Makes lots of assumptions! Only supports RGBA for now.
-    fn parse_heirarchy<R: Read + Seek>(mut rdr: R) -> Result<PixelData, Error> {
+    fn parse_hierarchy<R: Read + Seek>(mut rdr: R, version: Version) -> Result<PixelData, Error> {
         // read the heirarchy
-        let width = rdr.read_u32::<BigEndian>()? as usize;
-        let height = rdr.read_u32::<BigEndian>()? as usize;
-        let bpp = rdr.read_u32::<BigEndian>()? as usize;
+        let width = rdr.read_u32::<BigEndian>()?;
+        let height = rdr.read_u32::<BigEndian>()?;
+        let bpp = rdr.read_u32::<BigEndian>()?;
         if bpp != 3 && bpp != 4 {
             return Err(Error::NotSupported);
         }
-        let lptr = rdr.read_u32::<BigEndian>()?;
+        let lptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
         let _dummpy_ptr_pos = rdr.seek(SeekFrom::Current(0))?;
-        rdr.seek(SeekFrom::Start(lptr as u64))?;
+        rdr.seek(SeekFrom::Start(lptr))?;
         // read the level
-        let level_width = rdr.read_u32::<BigEndian>()? as usize;
-        let level_height = rdr.read_u32::<BigEndian>()? as usize;
+        let level_width = rdr.read_u32::<BigEndian>()?;
+        let level_height = rdr.read_u32::<BigEndian>()?;
         if level_width != width || level_height != height {
             return Err(Error::InvalidFormat);
         }
@@ -386,13 +493,13 @@ impl PixelData {
         let mut pixels = vec![RgbaPixel([0, 0, 0, 255]); (width * height) as usize];
         let mut next_tptr_pos;
 
-        let tiles_x = (width as f32 / 64.0).ceil() as usize;
-        let tiles_y = (height as f32 / 64.0).ceil() as usize;
+        let tiles_x = (f64::from(width) / 64.0).ceil() as u32;
+        let tiles_y = (f64::from(height) / 64.0).ceil() as u32;
         for ty in 0..tiles_y {
             for tx in 0..tiles_x {
-                let tptr = rdr.read_u32::<BigEndian>()?;
+                let tptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
                 next_tptr_pos = rdr.seek(SeekFrom::Current(0))?;
-                rdr.seek(SeekFrom::Start(tptr as u64))?;
+                rdr.seek(SeekFrom::Start(tptr))?;
 
                 let mut cursor = TileCursor::new(width, height, tx, ty, bpp);
                 cursor.feed(&mut rdr, &mut pixels)?;
@@ -415,11 +522,11 @@ impl PixelData {
         Ok(PixelData { pixels, width, height })
     }
 
-    pub fn pixel(&self, x: usize, y: usize) -> Option<RgbaPixel> {
+    pub fn pixel(&self, x: u32, y: u32) -> Option<RgbaPixel> {
         if x >= self.width || y >= self.height {
             return None;
         }
-        Some(self.pixels[y * self.width + x])
+        Some(self.pixels[(y * self.width + x) as usize])
     }
 
     /// Creates a raw sub buffer from self.
@@ -427,8 +534,8 @@ impl PixelData {
     /// # Panics
     ///
     /// Panics if a pixel access is out of bounds.
-    pub fn raw_sub_rgba_buffer(&self, x: usize, y: usize, width: usize, height: usize) -> Vec<u8> {
-        let mut sub = Vec::with_capacity(width * height * 4);
+    pub fn raw_sub_rgba_buffer(&self, x: u32, y: u32, width: u32, height: u32) -> Vec<u8> {
+        let mut sub = Vec::with_capacity((width * height * 4) as usize);
         for _y in y..(y + height) {
             for _x in x..(x + width) {
                 if _y > self.height || _x > self.width {
@@ -437,17 +544,17 @@ impl PixelData {
                 sub.extend_from_slice(&self.pixel(_x, _y).unwrap().0);
             }
         }
-        return sub
+        sub
     }
 }
 
 pub struct TileCursor {
-    width: usize,
-    height: usize,
-    channels: usize,
-    x: usize,
-    y: usize,
-    i: usize,
+    width: u32,
+    height: u32,
+    channels: u32,
+    x: u32,
+    y: u32,
+    i: u32,
 }
 
 // TODO: I like the use of a struct but this isn't really any kind of cursor.
@@ -455,7 +562,7 @@ pub struct TileCursor {
 // stuff we need to store within the "algorithm." A better design is very welcome! i should be
 // moved into feed as a local.
 impl TileCursor {
-    fn new(width: usize, height: usize, tx: usize, ty: usize, channels: usize) -> TileCursor {
+    fn new(width: u32, height: u32, tx: u32, ty: u32, channels: u32) -> TileCursor {
         TileCursor {
             width,
             height,
@@ -475,37 +582,37 @@ impl TileCursor {
         let mut channel = 0;
         while channel < self.channels {
             while self.i < twidth * theight {
-                let determinant = rdr.read_u8()? as u32;
+                let determinant = rdr.read_u8()?;
                 if determinant < 127 { // A short run of identical bytes
-                    let run = (determinant + 1) as usize;
+                    let run = u32::from(determinant + 1);
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
-                        pixels[index].0[channel] = v;
+                        pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += run;
                 } else if determinant == 127 { // A long run of identical bytes
-                    let run = rdr.read_u16::<BigEndian>()? as usize;
+                    let run = u32::from(rdr.read_u16::<BigEndian>()?);
                     let v = rdr.read_u8()?;
                     for i in (self.i)..(self.i + run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
-                        pixels[index].0[channel] = v;
+                        pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += run;
                 } else if determinant == 128 { // A long run of different bytes
-                    let stream_run = rdr.read_u16::<BigEndian>()? as usize;
+                    let stream_run = u32::from(rdr.read_u16::<BigEndian>()?);
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
                         let v = rdr.read_u8()?;
-                        pixels[index].0[channel] = v;
+                        pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += stream_run;
                 } else { // A short run of different bytes
-                    let stream_run = (256 - determinant) as usize;
+                    let stream_run = 256 - u32::from(determinant);
                     for i in (self.i)..(self.i + stream_run) {
                         let index = base_offset + (i / twidth) * self.width + i % twidth;
                         let v = rdr.read_u8()?;
-                        pixels[index].0[channel] = v;
+                        pixels[index as usize].0[channel as usize] = v;
                     }
                     self.i += stream_run;
                 }

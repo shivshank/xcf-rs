@@ -58,6 +58,7 @@ fn read_512x512_yellow_base_cloud_layer_empty_layer() -> Result<(), Error> {
     let raw_image = Xcf::open("tests/samples/512x512-yellow-base-cloud-layer-empty-layer.xcf")?;
 
     assert_eq!(raw_image.dimensions(), (512, 512));
+    assert_eq!(raw_image.layers.len(), 3);
 
     for layer in &raw_image.layers {
         assert_eq!(layer.dimensions(), raw_image.dimensions());

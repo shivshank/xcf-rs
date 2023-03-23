@@ -62,7 +62,7 @@ impl Xcf {
             if layer_pointer == 0 {
                 break;
             }
-            let current_pos = rdr.seek(SeekFrom::Current(0))?;
+            let current_pos = rdr.stream_position()?;
             rdr.seek(SeekFrom::Start(layer_pointer))?;
             layers.push(Layer::parse(&mut rdr, header.version)?);
             rdr.seek(SeekFrom::Start(current_pos))?;
@@ -431,7 +431,7 @@ impl Layer {
         let name = read_gimp_string(&mut rdr)?;
         let properties = Property::parse_list(&mut rdr)?;
         let hptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-        let current_pos = rdr.seek(SeekFrom::Current(0))?;
+        let current_pos = rdr.stream_position()?;
         rdr.seek(SeekFrom::Start(hptr))?;
         let pixels = PixelData::parse_hierarchy(&mut rdr, version)?;
         rdr.seek(SeekFrom::Start(current_pos))?;
@@ -498,7 +498,7 @@ impl PixelData {
             return Err(Error::NotSupported);
         }
         let lptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-        let _dummpy_ptr_pos = rdr.seek(SeekFrom::Current(0))?;
+        let _dummpy_ptr_pos = rdr.stream_position()?;
         rdr.seek(SeekFrom::Start(lptr))?;
         // read the level
         let level_width = rdr.read_u32::<BigEndian>()?;
@@ -515,7 +515,7 @@ impl PixelData {
         for ty in 0..tiles_y {
             for tx in 0..tiles_x {
                 let tptr = rdr.read_uint::<BigEndian>(version.bytes_per_offset())?;
-                next_tptr_pos = rdr.seek(SeekFrom::Current(0))?;
+                next_tptr_pos = rdr.stream_position()?;
                 rdr.seek(SeekFrom::Start(tptr))?;
 
                 let mut cursor = TileCursor::new(width, height, tx, ty, bpp);
